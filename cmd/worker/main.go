@@ -8,6 +8,7 @@ import (
 	"github.com/fahmiabd/task-platform-worker/internal/worker"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/nats-io/nats.go"
+	"github.com/nats-io/nats.go/jetstream"
 )
 
 func main() {
@@ -30,21 +31,38 @@ func main() {
 	}
 	defer nc.Close()
 
-	_, err = nc.Subscribe("tasks.>", func(msg *nats.Msg) {
-		if err := worker.HandleMessage(
-			ctx,
-			taskRepo,
-			msg.Data,
-		); err != nil {
-			log.Printf("failed to handle message: %v", err)
-		}
-	})
+	js, err := jetstream.New(nc)
+	if err != nil {
+		log.Fatal(err)
+	}
 
+	consumer, err := js.Consumer(
+		context.Background(),
+		"TASKS",
+		"worker",
+	)
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	log.Println("worker started")
 
-	select {}
+	for {
+		msgs, err := consumer.Fetch(1)
+		if err != nil {
+			continue
+		}
+
+		for msg := range msgs.Messages() {
+			if err := worker.HandleMessage(
+				ctx,
+				taskRepo,
+				msg.Data(),
+			); err != nil {
+				continue
+			}
+
+			msg.Ack()
+		}
+	}
 }
