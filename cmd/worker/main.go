@@ -55,21 +55,25 @@ func main() {
 		}
 
 		for msg := range msgs.Messages() {
-			if err := worker.HandleMessage(
+			err := worker.HandleMessage(
 				ctx,
 				taskRepo,
 				msg.Data(),
-			); err != nil {
-				switch {
-				case errors.Is(err, worker.ErrRetry):
-					msg.Nak()
+			)
 
-				case errors.Is(err, worker.ErrAck):
-					msg.Ack()
-				}
+			switch {
+			case err == nil:
+				msg.Ack()
+
+			case errors.Is(err, worker.ErrRetry):
+				msg.Nak()
+
+			case errors.Is(err, worker.ErrAck):
+				msg.Ack()
+
+			default:
+				msg.Nak()
 			}
-
-			msg.Ack()
 		}
 	}
 }

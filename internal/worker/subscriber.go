@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"log"
-	"time"
 
 	"github.com/fahmiabd/task-platform-worker/internal/repository"
 	"github.com/fahmiabd/task-platform-worker/internal/task"
@@ -24,7 +23,8 @@ func HandleMessage(
 	var message task.Message
 
 	if err := json.Unmarshal(data, &message); err != nil {
-		return err
+		log.Printf("invalid message")
+		return ErrAck
 	}
 
 	log.Printf(
@@ -35,39 +35,32 @@ func HandleMessage(
 
 	task, err := taskRepo.FindByID(ctx, message.TaskID)
 	if err != nil {
-		log.Printf(
-			"task_id=%s error on FindByID",
-			message.TaskID,
-		)
-		return ErrAck
+		switch {
+		case errors.Is(err, repository.ErrTaskNotFound):
+			log.Printf(
+				"task_id=%s not found",
+				message.TaskID,
+			)
+			return ErrAck
+
+		default:
+			return ErrRetry
+		}
 	}
 
 	if task.RetryCount >= 3 {
-		err = taskRepo.MarkFailed(ctx, message.TaskID)
-		if err != nil {
-			taskRepo.IncrementRetryCount(ctx, message.TaskID)
+		if err = taskRepo.MarkFailed(ctx, message.TaskID); err != nil {
 			return ErrRetry
 		}
 
 		return ErrAck
 	}
 
-	// test retry
-	// if task.RetryCount < 3 {
-	// 	log.Printf(
-	// 		"task_id=%s failed, retrying count=%d",
-	// 		message.TaskID,
-	// 		task.RetryCount,
-	// 	)
-	// 	taskRepo.IncrementRetryCount(ctx, message.TaskID)
-	// 	return ErrRetry
-	// }
-
 	if err := taskRepo.MarkProcessing(
 		ctx,
 		message.TaskID,
 	); err != nil {
-		taskRepo.IncrementRetryCount(ctx, message.TaskID)
+		IncrementRetryCount(ctx, taskRepo, message.TaskID)
 		return ErrRetry
 	}
 
@@ -76,13 +69,11 @@ func HandleMessage(
 		message.TaskID,
 	)
 
-	time.Sleep(3 * time.Second)
-
 	if err := taskRepo.MarkCompleted(
 		ctx,
 		message.TaskID,
 	); err != nil {
-		taskRepo.IncrementRetryCount(ctx, message.TaskID)
+		IncrementRetryCount(ctx, taskRepo, message.TaskID)
 		return ErrRetry
 	}
 
@@ -92,4 +83,14 @@ func HandleMessage(
 	)
 
 	return nil
+}
+
+func IncrementRetryCount(ctx context.Context, taskRepo *repository.TaskRepository, taskID string) {
+	if err := taskRepo.IncrementRetryCount(ctx, taskID); err != nil {
+		log.Printf(
+			"task_id=%s increment retry count failed: %v",
+			taskID,
+			err,
+		)
+	}
 }

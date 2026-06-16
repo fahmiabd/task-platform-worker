@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 
 	"github.com/fahmiabd/task-platform-worker/internal/entity"
 	"github.com/jackc/pgx/v5"
@@ -16,6 +17,8 @@ func NewTaskRepository(db *pgxpool.Pool) *TaskRepository {
 	return &TaskRepository{db: db}
 }
 
+var ErrTaskNotFound = errors.New("task not found")
+
 func (r *TaskRepository) FindByID(
 	ctx context.Context,
 	taskID string,
@@ -26,8 +29,16 @@ func (r *TaskRepository) FindByID(
 	}
 	defer rows.Close()
 
-	task, err := pgx.CollectOneRow(rows, pgx.RowToStructByName[entity.Task])
+	task, err := pgx.CollectOneRow(
+		rows,
+		pgx.RowToStructByName[entity.Task],
+	)
+
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrTaskNotFound
+		}
+
 		return nil, err
 	}
 
