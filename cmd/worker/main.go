@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log"
 
 	"github.com/fahmiabd/task-platform-worker/internal/repository"
@@ -59,7 +60,13 @@ func main() {
 				taskRepo,
 				msg.Data(),
 			); err != nil {
-				continue
+				switch {
+				case errors.Is(err, worker.ErrRetry):
+					msg.Nak()
+
+				case errors.Is(err, worker.ErrAck):
+					msg.Ack()
+				}
 			}
 
 			msg.Ack()
